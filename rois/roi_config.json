@@ -1,0 +1,20 @@
+{
+  "gameResolution": {
+    "width": 800,
+    "height": 600
+  },
+  "rois": {
+    "character": {
+      "x": 256,
+      "y": 271,
+      "width": 723,
+      "height": 370
+    },
+    "minimap": {
+      "x": 22,
+      "y": 126,
+      "width": 187,
+      "height": 149
+    }
+  }
+}

@@ -1,0 +1,23 @@
+using System;
+using System.Windows.Forms;
+
+namespace MapleViewCapture
+{
+    internal static class TestProgram
+    {
+        [STAThread]
+        static void Main()
+        {
+            try
+            {
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                Application.Run(new SimpleForm());
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"오류: {ex.Message}\n\nStackTrace:\n{ex.StackTrace}");
+            }
+        }
+    }
+}
