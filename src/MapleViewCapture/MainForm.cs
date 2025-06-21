@@ -264,7 +264,7 @@ namespace MapleViewCapture
             Button statusPanelButton = new Button
             {
                 Text = "Status Panel",
-                Location = new Point(120, 50),
+                Location = new Point(220, 50),
                 Size = new Size(100, 25),
                 BackColor = Color.LightCyan
             };
@@ -536,7 +536,14 @@ namespace MapleViewCapture
                 
                 performanceTimer.Stop();
                 double elapsedMs = performanceTimer.Elapsed.TotalMilliseconds;
-                performanceLabel.Text = $"성능: {elapsedMs:F1}ms ({(1000/elapsedMs):F1} FPS)";
+                double currentFPS = 1000.0 / elapsedMs;
+                performanceLabel.Text = $"성능: {elapsedMs:F1}ms ({currentFPS:F1} FPS)";
+                
+                // StatusPanel에 성능 정보 업데이트
+                if (statusPanel != null && !statusPanel.IsDisposed && statusPanel.Visible)
+                {
+                    statusPanel.UpdatePerformance(currentFPS, elapsedMs);
+                }
             }
         }
 

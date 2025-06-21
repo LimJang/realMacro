@@ -9,6 +9,8 @@ namespace MapleViewCapture
         private Label? hpLabel;
         private Label? mpLabel;
         private Label? templateCountLabel;
+        private Label? fpsLabel;
+        private Label? performanceLabel;
         private Panel? hpBar;
         private Panel? mpBar;
         private Panel? hpBackground;
@@ -17,6 +19,8 @@ namespace MapleViewCapture
         private HPMPDetector.StatusResult? lastHPResult = null;
         private HPMPDetector.StatusResult? lastMPResult = null;
         private int templateMatchCount = 0;
+        private double lastFPS = 0.0;
+        private double lastProcessingTime = 0.0;
 
         public StatusPanel()
         {
@@ -30,7 +34,7 @@ namespace MapleViewCapture
             
             // Form 설정
             this.Text = "Status Panel";
-            this.Size = new Size(300, 180);
+            this.Size = new Size(300, 220);
             this.FormBorderStyle = FormBorderStyle.FixedToolWindow;
             this.TopMost = true;
             this.StartPosition = FormStartPosition.Manual;
@@ -106,6 +110,26 @@ namespace MapleViewCapture
                 Font = new Font("Arial", 9)
             };
 
+            // FPS 정보
+            fpsLabel = new Label
+            {
+                Text = "FPS: --",
+                Location = new Point(15, 100),
+                Size = new Size(120, 20),
+                ForeColor = Color.LightGreen,
+                Font = new Font("Arial", 9, FontStyle.Bold)
+            };
+
+            // 성능 정보 (처리 시간)
+            performanceLabel = new Label
+            {
+                Text = "Process: -- ms",
+                Location = new Point(140, 100),
+                Size = new Size(140, 20),
+                ForeColor = Color.LightBlue,
+                Font = new Font("Arial", 9)
+            };
+
             // 컨트롤 추가
             hpBackground.Controls.Add(hpBar);
             mpBackground.Controls.Add(mpBar);
@@ -115,6 +139,8 @@ namespace MapleViewCapture
             this.Controls.Add(mpLabel);
             this.Controls.Add(mpBackground);
             this.Controls.Add(templateCountLabel);
+            this.Controls.Add(fpsLabel);
+            this.Controls.Add(performanceLabel);
         }
 
         public void UpdateHP(HPMPDetector.StatusResult hpResult)
@@ -202,6 +228,44 @@ namespace MapleViewCapture
                 {
                     templateCountLabel.ForeColor = Color.LightGray;
                 }
+            }
+        }
+
+        public void UpdatePerformance(double fps, double processingTimeMs)
+        {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => UpdatePerformance(fps, processingTimeMs)));
+                return;
+            }
+
+            lastFPS = fps;
+            lastProcessingTime = processingTimeMs;
+
+            if (fpsLabel != null)
+            {
+                fpsLabel.Text = $"FPS: {fps:F1}";
+                
+                // FPS에 따른 색상 변경
+                if (fps >= 8.0)
+                    fpsLabel.ForeColor = Color.LightGreen;    // 좋음
+                else if (fps >= 5.0)
+                    fpsLabel.ForeColor = Color.Yellow;        // 보통
+                else
+                    fpsLabel.ForeColor = Color.Orange;        // 나쁨
+            }
+
+            if (performanceLabel != null)
+            {
+                performanceLabel.Text = $"Process: {processingTimeMs:F1}ms";
+                
+                // 처리 시간에 따른 색상 변경
+                if (processingTimeMs <= 50.0)
+                    performanceLabel.ForeColor = Color.LightBlue;     // 빠름
+                else if (processingTimeMs <= 100.0)
+                    performanceLabel.ForeColor = Color.Yellow;        // 보통
+                else
+                    performanceLabel.ForeColor = Color.Orange;        // 느림
             }
         }
 
