@@ -5,6 +5,7 @@ using System.Windows.Forms;
 using System.Collections.Generic;
 using System.IO;
 using System.Drawing.Imaging;
+using OpenCV = OpenCvSharp;
 
 namespace MapleViewCapture
 {
@@ -55,6 +56,18 @@ namespace MapleViewCapture
 
         [DllImport("user32.dll")]
         public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
+
+        [DllImport("user32.dll")]
+        public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
+
+        [DllImport("user32.dll")]
+        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern bool BringWindowToTop(IntPtr hWnd);
 
         public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -111,6 +124,15 @@ namespace MapleViewCapture
         private Label thresholdLabel = null!;
         private double matchingThreshold = 0.8;
         private DateTime lastLogTime = DateTime.MinValue;
+        private int selectedMatchingMode = 0; // 0: 기본, 1: 다중모드, 2: 배경무시, 3: 단순상관
+
+        // 해상도 조정 관련
+        private Label resolutionLabel = null!;
+        private NumericUpDown widthNumeric = null!;
+        private NumericUpDown heightNumeric = null!;
+        private Button applyResolutionButton = null!;
+        private int currentWindowWidth = 800;
+        private int currentWindowHeight = 600;
 
         // HP/MP 임계값 설정 관련
         private float hpThreshold = 0.3f; // 기본 30%
@@ -249,7 +271,6 @@ namespace MapleViewCapture
                 BackColor = Color.LightGreen
             };
             loadRoiButton.Click += LoadRoiButton_Click;
-            loadRoiButton.Click += LoadRoiButton_Click;
 
             roiCaptureButton = new Button
             {
@@ -274,7 +295,7 @@ namespace MapleViewCapture
             templateModeButton = new Button
             {
                 Text = "템플릿 모드",
-                Location = new Point(230, 50),
+                Location = new Point(330, 50),
                 Size = new Size(90, 25),
                 BackColor = Color.LightYellow
             };
@@ -283,7 +304,7 @@ namespace MapleViewCapture
             saveTemplateButton = new Button
             {
                 Text = "템플릿 저장",
-                Location = new Point(330, 50),
+                Location = new Point(430, 50),
                 Size = new Size(90, 25),
                 Enabled = false
             };
@@ -292,7 +313,7 @@ namespace MapleViewCapture
             startMatchingButton = new Button
             {
                 Text = "매칭 시작",
-                Location = new Point(430, 50),
+                Location = new Point(530, 50),
                 Size = new Size(90, 25),
                 Enabled = false,
                 BackColor = Color.LightPink
@@ -302,30 +323,87 @@ namespace MapleViewCapture
             Button loadTemplateButton = new Button
             {
                 Text = "템플릿 로드",
-                Location = new Point(530, 50),
+                Location = new Point(630, 50),
                 Size = new Size(90, 25),
                 BackColor = Color.LightCyan
             };
             loadTemplateButton.Click += LoadTemplateButton_Click;
 
+            // 세 번째 줄: 해상도 관련 컨트롤들
+            resolutionLabel = new Label
+            {
+                Text = "창 해상도:",
+                Location = new Point(20, 80),
+                Size = new Size(70, 20),
+                ForeColor = Color.Black
+            };
+
+            widthNumeric = new NumericUpDown
+            {
+                Location = new Point(95, 78),
+                Size = new Size(60, 25),
+                Minimum = 400,
+                Maximum = 1920,
+                Value = currentWindowWidth,
+                Increment = 50
+            };
+
+            Label xLabel = new Label
+            {
+                Text = "×",
+                Location = new Point(160, 80),
+                Size = new Size(15, 20),
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = Color.Black
+            };
+
+            heightNumeric = new NumericUpDown
+            {
+                Location = new Point(180, 78),
+                Size = new Size(60, 25),
+                Minimum = 300,
+                Maximum = 1080,
+                Value = currentWindowHeight,
+                Increment = 50
+            };
+
+            applyResolutionButton = new Button
+            {
+                Text = "해상도 적용",
+                Location = new Point(250, 78),
+                Size = new Size(80, 25),
+                BackColor = Color.LightGreen
+            };
+            applyResolutionButton.Click += ApplyResolutionButton_Click;
+
+            // 강제 창 크기 변경 버튼
+            Button forceResizeButton = new Button
+            {
+                Text = "강제 적용",
+                Location = new Point(340, 78),
+                Size = new Size(80, 25),
+                BackColor = Color.Orange
+            };
+            forceResizeButton.Click += ForceResizeButton_Click;
+
             statusLabel = new Label
             {
                 Text = "상태: 창을 선택하세요",
-                Location = new Point(20, 80),
+                Location = new Point(20, 110),
                 Size = new Size(400, 20)
             };
 
             performanceLabel = new Label
             {
                 Text = "성능: 대기중",
-                Location = new Point(450, 80),
+                Location = new Point(450, 110),
                 Size = new Size(200, 20),
                 ForeColor = Color.Blue
             };
 
             previewPictureBox = new PictureBox
             {
-                Location = new Point(20, 110),
+                Location = new Point(20, 140),
                 Size = new Size(900, 450),
                 BorderStyle = BorderStyle.FixedSingle,
                 SizeMode = PictureBoxSizeMode.Zoom
@@ -340,7 +418,7 @@ namespace MapleViewCapture
             // 디버그 로그 ListBox
             debugListBox = new ListBox
             {
-                Location = new Point(940, 110),
+                Location = new Point(940, 140),
                 Size = new Size(430, 400),
                 Font = new Font("Consolas", 8),
                 SelectionMode = SelectionMode.One
@@ -349,7 +427,7 @@ namespace MapleViewCapture
             clearLogButton = new Button
             {
                 Text = "로그 지우기",
-                Location = new Point(940, 520),
+                Location = new Point(940, 550),
                 Size = new Size(80, 25)
             };
             clearLogButton.Click += (s, e) => {
@@ -361,13 +439,13 @@ namespace MapleViewCapture
             thresholdLabel = new Label
             {
                 Text = $"임계값: {matchingThreshold:F2}",
-                Location = new Point(1030, 520),
+                Location = new Point(1030, 550),
                 Size = new Size(100, 20)
             };
 
             thresholdTrackBar = new TrackBar
             {
-                Location = new Point(1130, 515),
+                Location = new Point(1130, 545),
                 Size = new Size(150, 30),
                 Minimum = 50,
                 Maximum = 99,
@@ -380,6 +458,35 @@ namespace MapleViewCapture
                 AddDebugLog($"임계값 변경: {matchingThreshold:F2}");
             };
 
+            // 매칭 모드 선택
+            Label matchModeLabel = new Label
+            {
+                Text = "매칭 모드:",
+                Location = new Point(730, 80),
+                Size = new Size(70, 20),
+                ForeColor = Color.Black
+            };
+
+            ComboBox matchModeCombo = new ComboBox
+            {
+                Location = new Point(810, 78),
+                Size = new Size(120, 25),
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            matchModeCombo.Items.AddRange(new string[]
+            {
+                "기본 (CCoeff)",
+                "다중 모드",
+                "배경 무시 (SqDiff)",
+                "단순 상관 (CCorr)"
+            });
+            matchModeCombo.SelectedIndex = 0;
+            matchModeCombo.SelectedIndexChanged += (s, e) => {
+                selectedMatchingMode = matchModeCombo.SelectedIndex;
+                AddDebugLog($"매칭 모드 변경: {matchModeCombo.SelectedItem} (모드 {selectedMatchingMode})");
+            };
+
+            // 해상도 조정 UI
             // 타이머 초기화
             captureTimer = new System.Windows.Forms.Timer
             {
@@ -408,6 +515,31 @@ namespace MapleViewCapture
             this.Controls.Add(clearLogButton);
             this.Controls.Add(thresholdLabel);
             this.Controls.Add(thresholdTrackBar);
+            this.Controls.Add(matchModeLabel);
+            this.Controls.Add(matchModeCombo);
+            this.Controls.Add(directXButton);
+            this.Controls.Add(roiModeButton);
+            this.Controls.Add(saveRoiButton);
+            this.Controls.Add(loadRoiButton);
+            this.Controls.Add(roiCaptureButton);
+            this.Controls.Add(statusPanelButton);
+            this.Controls.Add(templateModeButton);
+            this.Controls.Add(saveTemplateButton);
+            this.Controls.Add(startMatchingButton);
+            this.Controls.Add(loadTemplateButton);
+            this.Controls.Add(statusLabel);
+            this.Controls.Add(performanceLabel);
+            this.Controls.Add(previewPictureBox);
+            this.Controls.Add(debugListBox);
+            this.Controls.Add(clearLogButton);
+            this.Controls.Add(thresholdLabel);
+            this.Controls.Add(thresholdTrackBar);
+            this.Controls.Add(resolutionLabel);
+            this.Controls.Add(widthNumeric);
+            this.Controls.Add(xLabel);
+            this.Controls.Add(heightNumeric);
+            this.Controls.Add(applyResolutionButton);
+            this.Controls.Add(forceResizeButton);
 
             // 이벤트 연결
             windowComboBox.SelectedIndexChanged += WindowComboBox_SelectedIndexChanged;
@@ -488,8 +620,44 @@ namespace MapleViewCapture
                 statusLabel.Text = $"상태: '{selectedWindow.Title}' 창 선택됨";
                 startCaptureButton.Enabled = true;
                 
-                // 선택된 창을 800x600으로 설정
-                SetGameWindowSize();
+                // 현재 창 크기 감지
+                DetectCurrentWindowSize();
+                
+                // 선택된 창을 800x600으로 설정 (사용자가 원할 경우)
+                // SetGameWindowSize(); // 자동 실행 비활성화
+            }
+        }
+
+        private void DetectCurrentWindowSize()
+        {
+            if (gameWindowHandle != IntPtr.Zero)
+            {
+                if (GetWindowRect(gameWindowHandle, out RECT windowRect))
+                {
+                    int width = windowRect.Right - windowRect.Left;
+                    int height = windowRect.Bottom - windowRect.Top;
+                    
+                    // 클라이언트 영역 크기 계산 (테두리 제외)
+                    int clientWidth = width - 20;  // 좌우 테두리 제거
+                    int clientHeight = height - 60; // 상하 테두리 제거
+                    
+                    currentWindowWidth = clientWidth;
+                    currentWindowHeight = clientHeight;
+                    
+                    // UI에 현재 크기 표시
+                    if (widthNumeric != null && heightNumeric != null)
+                    {
+                        widthNumeric.Value = clientWidth;
+                        heightNumeric.Value = clientHeight;
+                    }
+                    
+                    AddDebugLog($"창 크기 감지: {width}x{height} (클라이언트: {clientWidth}x{clientHeight})");
+                    statusLabel.Text = $"상태: 창 크기 감지됨 - {clientWidth}x{clientHeight}";
+                }
+                else
+                {
+                    AddDebugLog("창 크기 감지 실패");
+                }
             }
         }
 
@@ -497,9 +665,14 @@ namespace MapleViewCapture
         {
             if (gameWindowHandle != IntPtr.Zero)
             {
-                // 창을 800x600 크기로 설정 (테두리 포함하여 약간 크게)
-                SetWindowPos(gameWindowHandle, IntPtr.Zero, 100, 100, 820, 640, SWP_NOZORDER);
-                statusLabel.Text = "상태: 게임 창 크기 조정 완료 (800x600)";
+                // 현재 설정된 해상도로 창 크기 설정 (테두리 포함하여 약간 크게)
+                int borderWidth = 20;
+                int borderHeight = 60;
+                SetWindowPos(gameWindowHandle, IntPtr.Zero, 100, 100, 
+                    currentWindowWidth + borderWidth, 
+                    currentWindowHeight + borderHeight, 
+                    SWP_NOZORDER);
+                statusLabel.Text = $"상태: 게임 창 크기 조정 완료 ({currentWindowWidth}x{currentWindowHeight})";
             }
         }
 
@@ -516,6 +689,153 @@ namespace MapleViewCapture
                 captureTimer.Start();
                 startCaptureButton.Text = "캡처 중지";
                 statusLabel.Text = "상태: 캡처 중 (100ms 간격)";
+            }
+        }
+
+        private void ApplyResolutionButton_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                int newWidth = (int)widthNumeric.Value;
+                int newHeight = (int)heightNumeric.Value;
+                
+                if (gameWindowHandle != IntPtr.Zero)
+                {
+                    // 창 크기 조정 (테두리 포함하여 약간 크게)
+                    int borderWidth = 20;  // 좌우 테두리
+                    int borderHeight = 60; // 상하 테두리 (제목표시줄 포함)
+                    
+                    bool success = SetWindowPos(gameWindowHandle, IntPtr.Zero, 
+                        100, 100, 
+                        newWidth + borderWidth, 
+                        newHeight + borderHeight, 
+                        SWP_NOZORDER);
+                    
+                    if (success)
+                    {
+                        currentWindowWidth = newWidth;
+                        currentWindowHeight = newHeight;
+                        statusLabel.Text = $"상태: 창 크기 조정 완료 ({newWidth}x{newHeight})";
+                        AddDebugLog($"해상도 변경: {newWidth}x{newHeight}");
+                    }
+                    else
+                    {
+                        // 메이플랜드 등 일부 게임에서는 SetWindowPos가 차단될 수 있음
+                        statusLabel.Text = "상태: 창 크기 조정 실패 - 게임에서 차단됨";
+                        AddDebugLog("해상도 변경 실패: 게임에서 SetWindowPos 차단 (메이플랜드 등)");
+                        AddDebugLog("수동으로 게임 해상도를 설정하거나 창모드로 변경해주세요");
+                        
+                        // 수동 설정 안내 메시지
+                        MessageBox.Show(
+                            "게임에서 자동 창 크기 조정이 차단되었습니다.\n\n" +
+                            "다음과 같이 수동으로 설정해주세요:\n" +
+                            "1. 게임을 창모드로 실행\n" +
+                            "2. 게임 설정에서 해상도를 원하는 크기로 변경\n" +
+                            "3. 다시 캡처를 시도해보세요\n\n" +
+                            $"권장 해상도: {newWidth}x{newHeight}",
+                            "창 크기 조정 실패",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information
+                        );
+                    }
+                }
+                else
+                {
+                    statusLabel.Text = "상태: 먼저 창을 선택하세요";
+                    AddDebugLog("해상도 변경 실패: 창이 선택되지 않음");
+                }
+            }
+            catch (Exception ex)
+            {
+                statusLabel.Text = $"상태: 해상도 조정 오류 - {ex.Message}";
+                AddDebugLog($"해상도 변경 오류: {ex.Message}");
+            }
+        }
+
+        private void ForceResizeButton_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                int newWidth = (int)widthNumeric.Value;
+                int newHeight = (int)heightNumeric.Value;
+                
+                if (gameWindowHandle != IntPtr.Zero)
+                {
+                    AddDebugLog($"강제 창 크기 변경 시도: {newWidth}x{newHeight}");
+                    
+                    // 방법 1: MoveWindow API 사용 (더 강력함)
+                    bool success1 = MoveWindow(gameWindowHandle, 100, 100, 
+                        newWidth + 20, newHeight + 60, true);
+                    
+                    if (success1)
+                    {
+                        currentWindowWidth = newWidth;
+                        currentWindowHeight = newHeight;
+                        statusLabel.Text = $"상태: 강제 창 크기 조정 완료 ({newWidth}x{newHeight})";
+                        AddDebugLog($"강제 해상도 변경 성공 (MoveWindow): {newWidth}x{newHeight}");
+                        return;
+                    }
+                    
+                    // 방법 2: SetWindowPos with SWP_FRAMECHANGED 플래그
+                    const uint SWP_FRAMECHANGED = 0x0020;
+                    bool success2 = SetWindowPos(gameWindowHandle, IntPtr.Zero, 
+                        100, 100, 
+                        newWidth + 20, newHeight + 60, 
+                        SWP_NOZORDER | SWP_FRAMECHANGED);
+                    
+                    if (success2)
+                    {
+                        currentWindowWidth = newWidth;
+                        currentWindowHeight = newHeight;
+                        statusLabel.Text = $"상태: 강제 창 크기 조정 완료 ({newWidth}x{newHeight})";
+                        AddDebugLog($"강제 해상도 변경 성공 (SetWindowPos+FRAMECHANGED): {newWidth}x{newHeight}");
+                        return;
+                    }
+                    
+                    // 방법 3: ShowWindow + MoveWindow 조합
+                    const int SW_RESTORE = 9;
+                    ShowWindow(gameWindowHandle, SW_RESTORE);
+                    System.Threading.Thread.Sleep(100); // 잠깐 대기
+                    
+                    bool success3 = MoveWindow(gameWindowHandle, 100, 100,
+                        newWidth + 20, newHeight + 60, true);
+                    
+                    if (success3)
+                    {
+                        currentWindowWidth = newWidth;
+                        currentWindowHeight = newHeight;
+                        statusLabel.Text = $"상태: 강제 창 크기 조정 완료 ({newWidth}x{newHeight})";
+                        AddDebugLog($"강제 해상도 변경 성공 (ShowWindow+MoveWindow): {newWidth}x{newHeight}");
+                        return;
+                    }
+                    
+                    // 모든 방법 실패
+                    statusLabel.Text = "상태: 모든 강제 방법 실패 - 게임이 완전히 차단함";
+                    AddDebugLog("강제 해상도 변경 실패: 모든 Win32 API 방법이 차단됨");
+                    
+                    MessageBox.Show(
+                        "모든 강제 창 크기 변경 방법이 실패했습니다.\n\n" +
+                        "이 게임은 외부 프로그램의 창 조작을 완전히 차단합니다.\n" +
+                        "게임 내 설정에서 직접 해상도를 변경해주세요.\n\n" +
+                        "또는 다음을 시도해보세요:\n" +
+                        "1. 게임을 관리자 권한으로 실행\n" +
+                        "2. 게임의 호환성 설정 변경\n" +
+                        "3. 창모드로 실행 후 수동 크기 조정",
+                        "강제 창 크기 조정 실패",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning
+                    );
+                }
+                else
+                {
+                    statusLabel.Text = "상태: 먼저 창을 선택하세요";
+                    AddDebugLog("강제 해상도 변경 실패: 창이 선택되지 않음");
+                }
+            }
+            catch (Exception ex)
+            {
+                statusLabel.Text = $"상태: 강제 해상도 조정 오류 - {ex.Message}";
+                AddDebugLog($"강제 해상도 변경 오류: {ex.Message}");
             }
         }
 
@@ -656,11 +976,45 @@ namespace MapleViewCapture
                             {
                                 try
                                 {
-                                    var matchResult = TemplateMatching.FindTemplate(
-                                        sourceImage, 
-                                        templates[templateName], 
-                                        matchingThreshold
-                                    );
+                                    TemplateMatching.MatchResult matchResult;
+                                    
+                                    // 선택된 매칭 모드에 따라 다른 방법 사용
+                                    switch (selectedMatchingMode)
+                                    {
+                                        case 1: // 다중 모드
+                                            matchResult = TemplateMatching.FindTemplateBestMode(
+                                                sourceImage, 
+                                                templates[templateName], 
+                                                matchingThreshold
+                                            );
+                                            break;
+                                            
+                                        case 2: // 배경 무시 (SqDiff)
+                                            matchResult = TemplateMatching.FindTemplateWithMode(
+                                                sourceImage, 
+                                                templates[templateName], 
+                                                matchingThreshold,
+                                                OpenCV.TemplateMatchModes.SqDiffNormed
+                                            );
+                                            break;
+                                            
+                                        case 3: // 단순 상관 (CCorr)
+                                            matchResult = TemplateMatching.FindTemplateWithMode(
+                                                sourceImage, 
+                                                templates[templateName], 
+                                                matchingThreshold,
+                                                OpenCV.TemplateMatchModes.CCorrNormed
+                                            );
+                                            break;
+                                            
+                                        default: // 기본 (CCoeff)
+                                            matchResult = TemplateMatching.FindTemplate(
+                                                sourceImage, 
+                                                templates[templateName], 
+                                                matchingThreshold
+                                            );
+                                            break;
+                                    }
 
                                     if (matchResult.IsMatch)
                                     {
@@ -692,7 +1046,9 @@ namespace MapleViewCapture
                                         // 좌표 로그 출력 (3초마다만)
                                         if (DateTime.Now.Subtract(lastLogTime).TotalSeconds >= 3)
                                         {
-                                            AddDebugLog($"🎯 [{roiName}] {templateName} 발견! " +
+                                            string[] modeNames = { "기본", "다중", "배경무시", "단순상관" };
+                                            string modeName = modeNames[selectedMatchingMode];
+                                            AddDebugLog($"🎯 [{roiName}] {templateName} 발견! ({modeName}) " +
                                                       $"중심점:({matchResult.CenterPoint.X},{matchResult.CenterPoint.Y}) " +
                                                       $"신뢰도:{matchResult.Confidence:F2}");
                                             lastLogTime = DateTime.Now;
@@ -1166,7 +1522,7 @@ namespace MapleViewCapture
                 {
                     AddDebugLog($"JSON 파일 발견: {configPath}");
                     string json = File.ReadAllText(configPath);
-                    dynamic config = Newtonsoft.Json.JsonConvert.DeserializeObject(json);
+                    dynamic? config = Newtonsoft.Json.JsonConvert.DeserializeObject(json);
                     
                     savedRois.Clear();
                     
