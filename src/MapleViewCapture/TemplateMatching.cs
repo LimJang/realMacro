@@ -64,7 +64,53 @@ namespace MapleViewCapture
             }
         }
 
-        private static Mat BitmapToMat(Bitmap bitmap)
+        // 사전변환된 템플릿을 사용하는 최적화된 버전
+        public static MatchResult FindTemplateOptimized(Bitmap sourceImage, Mat preconvertedTemplate, double threshold = 0.8)
+        {
+            try
+            {
+                // 소스 이미지만 변환 (템플릿은 이미 변환됨)
+                Mat sourceMat = BitmapToMat(sourceImage);
+
+                // 템플릿 매칭 수행
+                Mat result = new Mat();
+                Cv2.MatchTemplate(sourceMat, preconvertedTemplate, result, TemplateMatchModes.CCoeffNormed);
+
+                // 최고 매칭 위치 찾기
+                Cv2.MinMaxLoc(result, out double minVal, out double maxVal, out OpenCvSharp.Point minLoc, out OpenCvSharp.Point maxLoc);
+
+                // 결과 생성
+                var matchResult = new MatchResult
+                {
+                    Location = new System.Drawing.Point(maxLoc.X, maxLoc.Y),
+                    Confidence = maxVal,
+                    IsMatch = maxVal >= threshold
+                };
+
+                if (matchResult.IsMatch)
+                {
+                    matchResult.BoundingBox = new System.Drawing.Rectangle(
+                        maxLoc.X, maxLoc.Y, 
+                        preconvertedTemplate.Width, preconvertedTemplate.Height);
+                    
+                    matchResult.CenterPoint = new System.Drawing.Point(
+                        maxLoc.X + preconvertedTemplate.Width / 2,
+                        maxLoc.Y + preconvertedTemplate.Height / 2);
+                }
+
+                // 리소스 정리 (소스만, 템플릿은 재사용되므로 해제하지 않음)
+                sourceMat.Dispose();
+                result.Dispose();
+
+                return matchResult;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"최적화된 템플릿 매칭 실패: {ex.Message}");
+            }
+        }
+
+        public static Mat BitmapToMat(Bitmap bitmap)
         {
             // Bitmap을 BGR 형식의 Mat으로 변환
             BitmapData bmpData = bitmap.LockBits(

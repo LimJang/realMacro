@@ -6,7 +6,7 @@ namespace MapleViewCapture
 {
     public class ScreenCapture
     {
-        public static Bitmap CaptureWindow(IntPtr windowHandle)
+        public static Bitmap? CaptureWindow(IntPtr windowHandle)
         {
             try
             {

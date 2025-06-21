@@ -100,6 +100,7 @@ namespace MapleViewCapture
         private bool isTemplateMode = false;
         private bool isMatchingMode = false;
         private Dictionary<string, Bitmap> templates = new Dictionary<string, Bitmap>();
+        private Dictionary<string, OpenCvSharp.Mat> preconvertedTemplates = new Dictionary<string, OpenCvSharp.Mat>();
         private Dictionary<string, List<string>> roiTemplateMap = new Dictionary<string, List<string>>();
         private Button templateModeButton = null!;
         private Button saveTemplateButton = null!;
@@ -110,6 +111,13 @@ namespace MapleViewCapture
         private Label thresholdLabel = null!;
         private double matchingThreshold = 0.8;
         private DateTime lastLogTime = DateTime.MinValue;
+
+        // HP/MP 임계값 설정 관련
+        private float hpThreshold = 0.3f; // 기본 30%
+        private float mpThreshold = 0.2f; // 기본 20%
+
+        // Status Panel
+        private StatusPanel? statusPanel = null;
 
         // 생성자 수정
         public MainForm()
@@ -251,6 +259,17 @@ namespace MapleViewCapture
                 Enabled = false
             };
             roiCaptureButton.Click += RoiCaptureButton_Click;
+
+            // Status Panel 버튼
+            Button statusPanelButton = new Button
+            {
+                Text = "Status Panel",
+                Location = new Point(120, 50),
+                Size = new Size(100, 25),
+                BackColor = Color.LightCyan
+            };
+            statusPanelButton.Click += StatusPanelButton_Click;
+
             // 세 번째 줄 버튼들 (템플릿 관련)
             templateModeButton = new Button
             {
@@ -377,6 +396,7 @@ namespace MapleViewCapture
             this.Controls.Add(saveRoiButton);
             this.Controls.Add(loadRoiButton);
             this.Controls.Add(roiCaptureButton);
+            this.Controls.Add(statusPanelButton);
             this.Controls.Add(templateModeButton);
             this.Controls.Add(saveTemplateButton);
             this.Controls.Add(startMatchingButton);
@@ -593,6 +613,16 @@ namespace MapleViewCapture
         {
             try
             {
+                // HP/MP 바 감지 처리 (순수 ROI 방식)
+                if (roiName == "hp_bar")
+                {
+                    return PerformHPMPDetection(sourceImage, roiName, true);
+                }
+                else if (roiName == "mp_bar")
+                {
+                    return PerformHPMPDetection(sourceImage, roiName, false);
+                }
+
                 // 결과 이미지를 그릴 Graphics 생성
                 Bitmap resultImage = new Bitmap(sourceImage);
                 using (Graphics g = Graphics.FromImage(resultImage))
@@ -697,6 +727,75 @@ namespace MapleViewCapture
             catch (Exception ex)
             {
                 AddDebugLog($"❌ 템플릿 매칭 전체 오류: {ex.Message}");
+                return sourceImage;
+            }
+        }
+
+        private Bitmap PerformHPMPDetection(Bitmap sourceImage, string roiName, bool isHP)
+        {
+            try
+            {
+                // HP/MP 감지 수행
+                HPMPDetector.StatusResult result = isHP ? 
+                    HPMPDetector.DetectHP(sourceImage, hpThreshold) :
+                    HPMPDetector.DetectMP(sourceImage, mpThreshold);
+
+                // 결과 이미지 생성
+                Bitmap resultImage = new Bitmap(sourceImage);
+                using (Graphics g = Graphics.FromImage(resultImage))
+                {
+                    // 상태 정보 표시
+                    using (Brush textBrush = new SolidBrush(result.StatusColor))
+                    using (Font font = new Font("Arial", 10, FontStyle.Bold))
+                    {
+                        string statusText = $"{result.Status}\n{(result.IsLow ? "⚠️ 위험!" : "✅ 안전")}";
+                        g.DrawString(statusText, font, textBrush, 5, 5);
+                    }
+
+                    // 바 길이 시각화
+                    int barHeight = 4;
+                    int barY = sourceImage.Height - barHeight - 2;
+                    
+                    // 배경 바 (회색)
+                    using (Brush bgBrush = new SolidBrush(Color.Gray))
+                    {
+                        g.FillRectangle(bgBrush, 0, barY, sourceImage.Width, barHeight);
+                    }
+                    
+                    // 실제 바 (색상)
+                    int actualWidth = (int)(sourceImage.Width * result.Ratio);
+                    using (Brush statusBrush = new SolidBrush(result.StatusColor))
+                    {
+                        g.FillRectangle(statusBrush, 0, barY, actualWidth, barHeight);
+                    }
+                }
+
+                // 위험 상태일 때 로그 출력 (3초마다)
+                if (result.IsLow && DateTime.Now.Subtract(lastLogTime).TotalSeconds >= 3)
+                {
+                    string type = isHP ? "HP" : "MP";
+                    AddDebugLog($"⚠️ {type} 위험! {result.Ratio:P0} (임계값: {(isHP ? hpThreshold : mpThreshold):P0})");
+                    lastLogTime = DateTime.Now;
+                }
+
+                // Status Panel에 결과 전달
+                if (statusPanel != null && !statusPanel.IsDisposed && statusPanel.Visible)
+                {
+                    if (isHP)
+                    {
+                        statusPanel.UpdateHP(result);
+                    }
+                    else
+                    {
+                        statusPanel.UpdateMP(result);
+                    }
+                }
+
+                return resultImage;
+            }
+            catch (Exception ex)
+            {
+                AddDebugLog($"❌ {roiName} 감지 오류: {ex.Message}");
                 return sourceImage;
             }
         }
@@ -1287,6 +1386,37 @@ namespace MapleViewCapture
             {
                 AddDebugLog($"ROI 윈도우 생성 전체 실패: {ex.Message}");
                 statusLabel.Text = $"상태: ROI 윈도우 생성 전체 실패 - {ex.Message}";
+            }
+        }
+
+        private void StatusPanelButton_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (statusPanel == null || statusPanel.IsDisposed)
+                {
+                    statusPanel = new StatusPanel();
+                    statusPanel.Show();
+                    AddDebugLog("Status Panel 생성 및 표시");
+                }
+                else
+                {
+                    if (statusPanel.Visible)
+                    {
+                        statusPanel.Hide();
+                        AddDebugLog("Status Panel 숨김");
+                    }
+                    else
+                    {
+                        statusPanel.Show();
+                        statusPanel.BringToFront();
+                        AddDebugLog("Status Panel 표시");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AddDebugLog($"Status Panel 오류: {ex.Message}");
             }
         }
 
