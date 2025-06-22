@@ -4,16 +4,29 @@
     "height": 600
   },
   "rois": {
+    
+    "mp_bar": {
+      "x": 443,
+      "y": 727,
+      "width": 140,
+      "height": 13
+    },
+    "hp_bar": {
+      "x": 300,
+      "y": 726,
+      "width": 140,
+      "height": 13
+    },
     "character": {
-      "x": 256,
-      "y": 271,
-      "width": 723,
-      "height": 370
+      "x": 425,
+      "y": 377,
+      "width": 511,
+      "height": 230
     },
     "minimap": {
       "x": 22,
       "y": 126,
-      "width": 187,
+      "width": 190,
       "height": 149
     }
   }

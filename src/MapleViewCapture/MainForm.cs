@@ -138,8 +138,25 @@ namespace MapleViewCapture
         private float hpThreshold = 0.3f; // 기본 30%
         private float mpThreshold = 0.2f; // 기본 20%
 
+        // 로그 창 관련
+        private Form? logWindow = null;
+        private TextBox? logTextBox = null;
+
         // Status Panel
         private StatusPanel? statusPanel = null;
+
+        // 거리 계산 및 좌표 관련
+        private Point lastMinimapPlayerPos = Point.Empty;
+        private List<DetectedObject> lastDetectedObjects = new List<DetectedObject>();
+
+        // 감지된 객체 정보 클래스
+        public class DetectedObject
+        {
+            public Point CenterPoint { get; set; }
+            public string TemplateName { get; set; } = "";
+            public string Type { get; set; } = ""; // "player" or "monster"
+            public double Distance { get; set; }
+        }
 
         // 생성자 수정
         public MainForm()
@@ -149,6 +166,15 @@ namespace MapleViewCapture
                 InitializeComponent();
                 availableWindows = new List<WindowInfo>();
                 AddDebugLog("프로그램 시작");
+                
+                // 로그 창 버튼 추가
+                CreateLogWindowButton();
+                
+                // 기존 디버그 ListBox 숨기기 (새 로그 창 사용)
+                if (debugListBox != null)
+                {
+                    debugListBox.Visible = false;
+                }
                 
                 // 시작 시 자동으로 템플릿 로드
                 LoadAllTemplates();
@@ -176,6 +202,14 @@ namespace MapleViewCapture
                     // 자동 스크롤 (최근 메시지가 보이도록)
                     if (debugListBox.Items.Count > 0)
                         debugListBox.TopIndex = debugListBox.Items.Count - 1;
+                    
+                    // 로그 창에도 추가
+                    if (logTextBox != null && !logTextBox.IsDisposed)
+                    {
+                        logTextBox.AppendText(logMessage + Environment.NewLine);
+                        logTextBox.SelectionStart = logTextBox.Text.Length;
+                        logTextBox.ScrollToCaret();
+                    }
                     
                     // 100개 이상이면 오래된 것 삭제
                     if (debugListBox.Items.Count > 100)
@@ -879,6 +913,9 @@ namespace MapleViewCapture
                 
                 if (fullCapture == null) return;
 
+                // 새 프레임마다 감지된 객체 리스트 초기화 (ROI 루프 시작 전에 한 번만)
+                lastDetectedObjects.Clear();
+
                 // 각 ROI 윈도우 업데이트
                 foreach (Form roiWindow in roiWindows)
                 {
@@ -917,6 +954,12 @@ namespace MapleViewCapture
                                 if (pictureBox.Image != null)
                                     pictureBox.Image.Dispose();
                                 pictureBox.Image = roiBitmap;
+                                
+                                // character ROI인 경우 보조선 다시 그리기
+                                if (roiName == "character")
+                                {
+                                    pictureBox.Invalidate();
+                                }
                             }));
                         }
                         else
@@ -924,11 +967,36 @@ namespace MapleViewCapture
                             if (pictureBox.Image != null)
                                 pictureBox.Image.Dispose();
                             pictureBox.Image = roiBitmap;
+                            
+                            // character ROI인 경우 보조선 다시 그리기
+                            if (roiName == "character")
+                            {
+                                pictureBox.Invalidate();
+                            }
                         }
                     }
                 }
 
                 fullCapture.Dispose();
+
+                // character ROI에서 감지된 객체들의 거리 계산
+                if (lastDetectedObjects.Any())
+                {
+                    var characterROI = savedRois.ContainsKey("character") ? savedRois["character"] : Rectangle.Empty;
+                    if (characterROI != Rectangle.Empty)
+                    {
+                        Point roiCenter = GetROICenterPoint(characterROI);
+                        
+                        // 각 감지된 객체의 거리 계산
+                        foreach (var obj in lastDetectedObjects)
+                        {
+                            obj.Distance = CalculateDistance(roiCenter, obj.CenterPoint);
+                        }
+                    }
+                }
+
+                // StatusPanel 정보 업데이트
+                UpdateDistanceInfo();
             }
             catch (Exception ex)
             {
@@ -1053,6 +1121,41 @@ namespace MapleViewCapture
                                                       $"중심점:({matchResult.CenterPoint.X},{matchResult.CenterPoint.Y}) " +
                                                       $"신뢰도:{matchResult.Confidence:F2}");
                                             lastLogTime = DateTime.Now;
+                                        }
+
+                                        // 감지된 객체 정보 수집 (character ROI에서만)
+                                        if (roiName == "character")
+                                        {
+                                            string objectType = InferObjectType(templateName);
+                                            
+                                            // ROI 내부 상대 좌표로 변환해서 저장
+                                            Point roiRelativePoint = new Point(
+                                                matchResult.CenterPoint.X, // 이미 ROI 내부 좌표
+                                                matchResult.CenterPoint.Y  // 이미 ROI 내부 좌표
+                                            );
+                                            
+                                            var detectedObj = new DetectedObject
+                                            {
+                                                CenterPoint = roiRelativePoint, // ROI 상대 좌표로 저장
+                                                TemplateName = templateName,
+                                                Type = objectType,
+                                                Distance = 0 // 나중에 계산
+                                            };
+                                            lastDetectedObjects.Add(detectedObj);
+                                            
+                                            // 감지 로그 추가
+                                            AddDebugLog($"🎯 객체 감지: {templateName} -> {objectType} at ROI좌표({roiRelativePoint.X}, {roiRelativePoint.Y})");
+                                        }
+
+                                        // 미니맵에서 플레이어 위치 감지
+                                        if (roiName == "minimap" && templateName.ToLower().Contains("player"))
+                                        {
+                                            // 미니맵 ROI 찾기
+                                            var minimapROI = savedRois.ContainsKey("minimap") ? savedRois["minimap"] : Rectangle.Empty;
+                                            if (minimapROI != Rectangle.Empty)
+                                            {
+                                                lastMinimapPlayerPos = ConvertMinimapCoordinates(matchResult.CenterPoint, minimapROI);
+                                            }
                                         }
                                     }
                                     else
@@ -1712,6 +1815,16 @@ namespace MapleViewCapture
                         roiPictureBox.BackColor = Color.Black;
 
                         roiWindow.Controls.Add(roiPictureBox);
+                        
+                        // character ROI에만 보조선 그리기 이벤트 추가
+                        if (roiName == "character")
+                        {
+                            roiPictureBox.Paint += (s, e) => {
+                                AddDebugLog($"🎨 Paint 이벤트 발생 - character ROI");
+                                DrawDistanceLines(e.Graphics, roiPictureBox, roiRect);
+                            };
+                        }
+                        
                         roiWindow.Tag = new { Name = roiName, Rect = roiRect, PictureBox = roiPictureBox };
                         
                         roiWindows.Add(roiWindow);
@@ -2284,6 +2397,259 @@ namespace MapleViewCapture
             {
                 AddDebugLog($"템플릿 추출 실패: {ex.Message}");
                 throw new Exception($"템플릿 추출 실패: {ex.Message}");
+            }
+        }
+
+        // ================== 거리 계산 및 좌표 시스템 ==================
+        
+        /// <summary>
+        /// 미니맵 이미지 좌표를 게임 좌표로 변환 (좌측하단 0,0 기준)
+        /// </summary>
+        private Point ConvertMinimapCoordinates(Point imagePos, Rectangle minimapROI)
+        {
+            return new Point(
+                imagePos.X - minimapROI.X,                              // 미니맵 ROI 내 상대 X
+                minimapROI.Height - (imagePos.Y - minimapROI.Y)         // Y축 반전 (좌측하단 기준)
+            );
+        }
+
+        /// <summary>
+        /// ROI 영역의 기하학적 중심점 계산
+        /// </summary>
+        private Point GetROICenterPoint(Rectangle roi)
+        {
+            return new Point(
+                roi.X + roi.Width / 2,
+                roi.Y + roi.Height / 2
+            );
+        }
+
+        /// <summary>
+        /// 템플릿 이름으로부터 객체 타입 추론
+        /// </summary>
+        private string InferObjectType(string templateName)
+        {
+            string lowerName = templateName.ToLower();
+            
+            if (lowerName.Contains("player") || lowerName.Contains("character") || lowerName.Contains("캐릭터"))
+                return "player";
+            else if (lowerName.Contains("monster") || lowerName.Contains("mob") || lowerName.Contains("몬스터"))
+                return "monster";
+            else
+                return "object"; // 기타 객체
+        }
+
+        /// <summary>
+        /// 두 점 사이의 직선 거리 계산
+        /// </summary>
+        private double CalculateDistance(Point center, Point target)
+        {
+            return Math.Sqrt(Math.Pow(target.X - center.X, 2) + Math.Pow(target.Y - center.Y, 2));
+        }
+
+        /// <summary>
+        /// character ROI 윈도우에 거리 보조선 그리기 (플레이어와 몬스터 간 직접 연결)
+        /// </summary>
+        /// <summary>
+        /// character ROI 윈도우에 거리 보조선 그리기 (플레이어와 몬스터 간 직접 연결)
+        /// </summary>
+        private void DrawDistanceLines(Graphics g, PictureBox pictureBox, Rectangle roiRect)
+        {
+            AddDebugLog($"🎨 DrawDistanceLines 호출됨 - 감지된 객체: {lastDetectedObjects?.Count ?? 0}개");
+            
+            if (lastDetectedObjects == null || !lastDetectedObjects.Any())
+            {
+                AddDebugLog("❌ 감지된 객체가 없어서 거리선 그리기 중단");
+                return;
+            }
+
+            try
+            {
+                AddDebugLog($"🎨 거리선 그리기 시작 - ROI: {roiRect}, PictureBox: {pictureBox.Width}x{pictureBox.Height}");
+                
+                // 플레이어와 몬스터 객체 분리
+                var players = lastDetectedObjects.Where(obj => obj.Type == "player").ToList();
+                var monsters = lastDetectedObjects.Where(obj => obj.Type == "monster").ToList();
+                
+                AddDebugLog($"🎨 분류 결과: 플레이어 {players.Count}개, 몬스터 {monsters.Count}개");
+
+                // 플레이어와 몬스터가 모두 있을 때만 거리선 그리기
+                if (players.Any() && monsters.Any())
+                {
+                    foreach (var player in players)
+                    {
+                        // 플레이어 좌표 (이미 ROI 상대 좌표)
+                        Point playerPoint = player.CenterPoint;
+                        
+                        foreach (var monster in monsters)
+                        {
+                            // 몬스터 좌표 (이미 ROI 상대 좌표)
+                            Point monsterPoint = monster.CenterPoint;
+                            
+                            AddDebugLog($"🎨 선 그리기: {player.TemplateName}({playerPoint.X},{playerPoint.Y}) → {monster.TemplateName}({monsterPoint.X},{monsterPoint.Y})");
+                            
+                            // 거리 계산
+                            double distance = Math.Sqrt(Math.Pow(monsterPoint.X - playerPoint.X, 2) + Math.Pow(monsterPoint.Y - playerPoint.Y, 2));
+                            
+                            // 거리에 따른 색상 및 투명도
+                            Color lineColor = Color.Red;
+                            int alpha = distance <= 100 ? 255 : Math.Max(100, 255 - (int)(distance / 2));
+                            lineColor = Color.FromArgb(alpha, lineColor);
+
+                            // 플레이어 ↔ 몬스터 직접 연결선 그리기
+                            using (Pen pen = new Pen(lineColor, 3))
+                            {
+                                g.DrawLine(pen, playerPoint, monsterPoint);
+                            }
+
+                            // 거리 텍스트 (선의 중점에 표시)
+                            Point midPoint = new Point(
+                                (playerPoint.X + monsterPoint.X) / 2,
+                                (playerPoint.Y + monsterPoint.Y) / 2
+                            );
+                            
+                            using (Brush textBrush = new SolidBrush(lineColor))
+                            using (Font font = new Font("Arial", 10, FontStyle.Bold))
+                            {
+                                string distanceText = $"{distance:F0}px";
+                                SizeF textSize = g.MeasureString(distanceText, font);
+                                
+                                // 텍스트 배경 (가독성을 위해)
+                                using (Brush bgBrush = new SolidBrush(Color.FromArgb(180, Color.Black)))
+                                {
+                                    g.FillRectangle(bgBrush, 
+                                        midPoint.X - textSize.Width/2 - 2, 
+                                        midPoint.Y - textSize.Height/2 - 1,
+                                        textSize.Width + 4, 
+                                        textSize.Height + 2);
+                                }
+                                
+                                g.DrawString(distanceText, font, textBrush, 
+                                    midPoint.X - textSize.Width/2, 
+                                    midPoint.Y - textSize.Height/2);
+                            }
+                        }
+                        
+                        // 플레이어 중심점 표시 (초록색)
+                        using (Brush playerBrush = new SolidBrush(Color.Green))
+                        {
+                            g.FillEllipse(playerBrush, playerPoint.X - 4, playerPoint.Y - 4, 8, 8);
+                        }
+                    }
+                    
+                    // 몬스터 중심점들 표시 (빨간색)
+                    foreach (var monster in monsters)
+                    {
+                        Point monsterPoint = monster.CenterPoint; // 이미 ROI 상대 좌표
+                        
+                        using (Brush monsterBrush = new SolidBrush(Color.Red))
+                        {
+                            g.FillEllipse(monsterBrush, monsterPoint.X - 4, monsterPoint.Y - 4, 8, 8);
+                        }
+                    }
+                }
+                else
+                {
+                    AddDebugLog($"🎨 플레이어 또는 몬스터가 없어서 거리선 생략");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddDebugLog($"보조선 그리기 오류: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// StatusPanel의 거리 및 좌표 정보 업데이트
+        /// </summary>
+        private void UpdateDistanceInfo()
+        {
+            if (statusPanel == null || statusPanel.IsDisposed || !statusPanel.Visible)
+                return;
+
+            try
+            {
+                // 미니맵 좌표 업데이트
+                if (lastMinimapPlayerPos != Point.Empty)
+                {
+                    statusPanel.UpdateMinimapPosition(lastMinimapPlayerPos);
+                }
+
+                // 감지된 객체 수 업데이트
+                int playerCount = lastDetectedObjects.Count(obj => obj.Type == "player");
+                int monsterCount = lastDetectedObjects.Count(obj => obj.Type == "monster");
+                statusPanel.UpdateDetectedCount(playerCount, monsterCount);
+
+                // 가장 가까운 몬스터 정보 업데이트
+                var monsters = lastDetectedObjects.Where(obj => obj.Type == "monster").ToList();
+                if (monsters.Any())
+                {
+                    var nearest = monsters.OrderBy(m => m.Distance).First();
+                    statusPanel.UpdateNearestMonster(nearest.Distance, nearest.TemplateName);
+                }
+                else
+                {
+                    statusPanel.UpdateNearestMonster(-1); // 몬스터 없음
+                }
+            }
+            catch (Exception ex)
+            {
+                AddDebugLog($"거리 정보 업데이트 오류: {ex.Message}");
+            }
+        }
+
+        // ================== 로그 창 시스템 ==================
+
+        private void CreateLogWindowButton()
+        {
+            Button logButton = new Button
+            {
+                Text = "로그 창",
+                Size = new Size(80, 30),
+                Location = new Point(720, 10), // 더 오른쪽으로 이동
+                BackColor = Color.LightBlue
+            };
+            logButton.Click += LogButton_Click;
+            this.Controls.Add(logButton);
+        }
+
+        private void LogButton_Click(object? sender, EventArgs e)
+        {
+            if (logWindow == null || logWindow.IsDisposed)
+            {
+                CreateLogWindow();
+            }
+            logWindow.Show();
+            logWindow.BringToFront();
+        }
+
+        private void CreateLogWindow()
+        {
+            logWindow = new Form
+            {
+                Text = "디버그 로그",
+                Size = new Size(800, 600),
+                StartPosition = FormStartPosition.CenterParent,
+                TopMost = true
+            };
+
+            logTextBox = new TextBox
+            {
+                Multiline = true,
+                ScrollBars = ScrollBars.Both,
+                WordWrap = false,
+                Dock = DockStyle.Fill,
+                Font = new Font("Consolas", 9),
+                BackColor = Color.Black,
+                ForeColor = Color.White
+            };
+
+            logWindow.Controls.Add(logTextBox);
+            
+            // 기존 로그 복사
+            foreach (var item in debugListBox.Items)
+            {
+                logTextBox.AppendText(item.ToString() + Environment.NewLine);
             }
         }
 

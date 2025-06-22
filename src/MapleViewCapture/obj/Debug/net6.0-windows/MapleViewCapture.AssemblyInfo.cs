@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("MapleViewCapture")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5b341fce5f096ae5222453da30d2f0eb0717c587")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2be7f6264bf28f116636b0f64e59fd4617c2253b")]
 [assembly: System.Reflection.AssemblyProductAttribute("MapleViewCapture")]
 [assembly: System.Reflection.AssemblyTitleAttribute("MapleViewCapture")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

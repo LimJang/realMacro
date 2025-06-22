@@ -11,6 +11,9 @@ namespace MapleViewCapture
         private Label? templateCountLabel;
         private Label? fpsLabel;
         private Label? performanceLabel;
+        private Label? minimapPosLabel;      // 미니맵 좌표 표시
+        private Label? nearestMonsterLabel;  // 가장 가까운 몬스터 거리
+        private Label? detectedCountLabel;   // 감지된 객체 수
         private Panel? hpBar;
         private Panel? mpBar;
         private Panel? hpBackground;
@@ -34,7 +37,7 @@ namespace MapleViewCapture
             
             // Form 설정
             this.Text = "Status Panel";
-            this.Size = new Size(300, 220);
+            this.Size = new Size(300, 280);
             this.FormBorderStyle = FormBorderStyle.FixedToolWindow;
             this.TopMost = true;
             this.StartPosition = FormStartPosition.Manual;
@@ -130,6 +133,36 @@ namespace MapleViewCapture
                 Font = new Font("Arial", 9)
             };
 
+            // 미니맵 좌표 정보
+            minimapPosLabel = new Label
+            {
+                Text = "미니맵: (---, ---)",
+                Location = new Point(15, 130),
+                Size = new Size(250, 20),
+                ForeColor = Color.Yellow,
+                Font = new Font("Arial", 9, FontStyle.Bold)
+            };
+
+            // 가장 가까운 몬스터 거리
+            nearestMonsterLabel = new Label
+            {
+                Text = "가장 가까운 몬스터: --px",
+                Location = new Point(15, 155),
+                Size = new Size(250, 20),
+                ForeColor = Color.Orange,
+                Font = new Font("Arial", 9)
+            };
+
+            // 감지된 객체 수
+            detectedCountLabel = new Label
+            {
+                Text = "감지: 캐릭터0, 몬스터0",
+                Location = new Point(15, 180),
+                Size = new Size(250, 20),
+                ForeColor = Color.LightGray,
+                Font = new Font("Arial", 9)
+            };
+
             // 컨트롤 추가
             hpBackground.Controls.Add(hpBar);
             mpBackground.Controls.Add(mpBar);
@@ -141,6 +174,9 @@ namespace MapleViewCapture
             this.Controls.Add(templateCountLabel);
             this.Controls.Add(fpsLabel);
             this.Controls.Add(performanceLabel);
+            this.Controls.Add(minimapPosLabel);
+            this.Controls.Add(nearestMonsterLabel);
+            this.Controls.Add(detectedCountLabel);
         }
 
         public void UpdateHP(HPMPDetector.StatusResult hpResult)
@@ -266,6 +302,72 @@ namespace MapleViewCapture
                     performanceLabel.ForeColor = Color.Yellow;        // 보통
                 else
                     performanceLabel.ForeColor = Color.Orange;        // 느림
+            }
+        }
+
+        public void UpdateMinimapPosition(Point gameCoords)
+        {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => UpdateMinimapPosition(gameCoords)));
+                return;
+            }
+
+            if (minimapPosLabel != null)
+            {
+                minimapPosLabel.Text = $"미니맵: ({gameCoords.X}, {gameCoords.Y})";
+            }
+        }
+
+        public void UpdateNearestMonster(double distance, string monsterName = "몬스터")
+        {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => UpdateNearestMonster(distance, monsterName)));
+                return;
+            }
+
+            if (nearestMonsterLabel != null)
+            {
+                if (distance >= 0)
+                {
+                    nearestMonsterLabel.Text = $"가장 가까운 {monsterName}: {distance:F0}px";
+                    
+                    // 거리에 따른 색상 변경
+                    if (distance <= 50)
+                        nearestMonsterLabel.ForeColor = Color.Red;        // 매우 가까움
+                    else if (distance <= 100)
+                        nearestMonsterLabel.ForeColor = Color.Orange;     // 가까움
+                    else if (distance <= 200)
+                        nearestMonsterLabel.ForeColor = Color.Yellow;     // 보통
+                    else
+                        nearestMonsterLabel.ForeColor = Color.LightGreen; // 멀음
+                }
+                else
+                {
+                    nearestMonsterLabel.Text = "가장 가까운 몬스터: 없음";
+                    nearestMonsterLabel.ForeColor = Color.Gray;
+                }
+            }
+        }
+
+        public void UpdateDetectedCount(int playerCount, int monsterCount)
+        {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => UpdateDetectedCount(playerCount, monsterCount)));
+                return;
+            }
+
+            if (detectedCountLabel != null)
+            {
+                detectedCountLabel.Text = $"감지: 캐릭터{playerCount}, 몬스터{monsterCount}";
+                
+                // 감지된 객체 수에 따른 색상
+                if (playerCount > 0 || monsterCount > 0)
+                    detectedCountLabel.ForeColor = Color.LightGreen;
+                else
+                    detectedCountLabel.ForeColor = Color.Gray;
             }
         }
 
