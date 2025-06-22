@@ -306,7 +306,8 @@ namespace MapleViewCapture
                 Text = "템플릿 저장",
                 Location = new Point(430, 50),
                 Size = new Size(90, 25),
-                Enabled = false
+                Enabled = true,  // 항상 활성화
+                BackColor = Color.LightGreen
             };
             saveTemplateButton.Click += SaveTemplateButton_Click;
 
@@ -1458,8 +1459,7 @@ namespace MapleViewCapture
                     }
                     else if (isTemplateMode)
                     {
-                        saveTemplateButton.Enabled = true;
-                        statusLabel.Text = $"상태: 템플릿 선택됨 ({currentRoi.Width}x{currentRoi.Height}) - 저장 버튼을 누르세요";
+                        statusLabel.Text = $"상태: 템플릿 영역 선택됨 ({currentRoi.Width}x{currentRoi.Height}) - 저장 버튼을 누르세요";
                     }
                 }
                 else
@@ -1856,40 +1856,45 @@ namespace MapleViewCapture
                 templateModeButton.Text = "템플릿 모드";
                 templateModeButton.BackColor = Color.LightYellow;
                 statusLabel.Text = "상태: 일반 모드";
-                saveTemplateButton.Enabled = false;
                 previewPictureBox.Invalidate(); // 템플릿 사각형 지우기
             }
         }
 
         private void SaveTemplateButton_Click(object sender, EventArgs e)
         {
-            if (currentRoi.Width > 0 && currentRoi.Height > 0 && lastCapturedImage != null)
+            // 현재 캡처된 이미지가 있으면 바로 저장
+            if (lastCapturedImage != null)
             {
                 try
                 {
                     // 템플릿 이름 입력 받기
                     string templateName = Microsoft.VisualBasic.Interaction.InputBox(
-                        "템플릿 이름을 입력하세요:\n(예: player_character, goblin_monster, player_icon_minimap)",
+                        "템플릿 이름을 입력하세요:",
                         "템플릿 저장",
                         "template_" + DateTime.Now.ToString("HHmmss"));
 
                     if (!string.IsNullOrEmpty(templateName))
                     {
-                        // 카테고리 선택
-                        string[] categories = { "character", "monster", "object", "minimap" };
-                        string category = Microsoft.VisualBasic.Interaction.InputBox(
-                            "카테고리를 선택하세요:\n" + string.Join(", ", categories),
-                            "카테고리 선택",
-                            "character");
-
-                        if (string.IsNullOrEmpty(category) || !Array.Exists(categories, c => c == category))
-                            category = "object";
-
-                        // 템플릿 이미지 추출
-                        Bitmap templateImage = ExtractTemplate(lastCapturedImage, currentRoi);
+                        Bitmap templateImage;
                         
+                        // ROI가 설정되어 있으면 ROI 영역만, 없으면 전체 이미지 저장
+                        if (currentRoi.Width > 0 && currentRoi.Height > 0 && 
+                            currentRoi.Right <= lastCapturedImage.Width && 
+                            currentRoi.Bottom <= lastCapturedImage.Height)
+                        {
+                            // ROI 영역 추출
+                            templateImage = ExtractTemplate(lastCapturedImage, currentRoi);
+                            AddDebugLog($"ROI 템플릿 저장: {templateName} ({currentRoi.Width}x{currentRoi.Height})");
+                        }
+                        else
+                        {
+                            // 전체 이미지 복사
+                            templateImage = new Bitmap(lastCapturedImage);
+                            AddDebugLog($"전체 이미지 템플릿 저장: {templateName} ({templateImage.Width}x{templateImage.Height})");
+                        }
+
                         // 파일 저장
-                        string templateDir = $@"D:\macro\templates\{category}";
+                        string templateDir = @"D:\macro\templates";
                         Directory.CreateDirectory(templateDir);
                         string templatePath = Path.Combine(templateDir, $"{templateName}.png");
                         
@@ -1898,18 +1903,31 @@ namespace MapleViewCapture
                         // 메모리에 로드
                         templates[templateName] = templateImage;
                         
-                        // 즉시 ROI 매핑 업데이트
-                        SetTemplateRoiMappingForSingle(templateName, category);
-                        
-                        statusLabel.Text = $"상태: 템플릿 '{templateName}' 저장 완료 ({category})";
+                        statusLabel.Text = $"상태: 템플릿 '{templateName}' 저장 완료";
                         startMatchingButton.Enabled = templates.Count > 0;
-                        AddDebugLog($"템플릿 저장 및 로드됨: {templateName} ({category})");
+                        AddDebugLog($"템플릿 저장 완료: {templateName} -> {templatePath}");
+                        
+                        // ROI 모드였다면 해제
+                        if (isTemplateMode)
+                        {
+                            isTemplateMode = false;
+                            templateModeButton.Text = "템플릿 모드";
+                            templateModeButton.BackColor = Color.LightYellow;
+                            currentRoi = Rectangle.Empty;
+                            previewPictureBox.Invalidate();
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
                     statusLabel.Text = $"상태: 템플릿 저장 실패 - {ex.Message}";
+                    AddDebugLog($"템플릿 저장 실패: {ex.Message}");
                 }
+            }
+            else
+            {
+                statusLabel.Text = "상태: 먼저 이미지를 캡처하세요";
+                AddDebugLog("템플릿 저장 실패: 캡처된 이미지가 없음");
             }
         }
 
@@ -2237,13 +2255,36 @@ namespace MapleViewCapture
 
         private Bitmap ExtractTemplate(Bitmap sourceImage, Rectangle roi)
         {
-            // ROI 영역을 템플릿으로 추출
-            Bitmap template = new Bitmap(roi.Width, roi.Height);
-            using (Graphics g = Graphics.FromImage(template))
+            try
             {
-                g.DrawImage(sourceImage, 0, 0, roi, GraphicsUnit.Pixel);
+                // ROI 경계 검증
+                if (roi.X < 0 || roi.Y < 0 || 
+                    roi.Right > sourceImage.Width || 
+                    roi.Bottom > sourceImage.Height ||
+                    roi.Width <= 0 || roi.Height <= 0)
+                {
+                    throw new ArgumentException($"ROI 영역이 유효하지 않습니다. ROI: {roi}, 이미지 크기: {sourceImage.Width}x{sourceImage.Height}");
+                }
+
+                // ROI 영역을 템플릿으로 추출
+                Bitmap template = new Bitmap(roi.Width, roi.Height);
+                using (Graphics g = Graphics.FromImage(template))
+                {
+                    // 올바른 매개변수 순서: 대상 위치, 소스 이미지, 소스 영역, 단위
+                    g.DrawImage(sourceImage, 
+                        new Rectangle(0, 0, roi.Width, roi.Height), // 대상 영역 (템플릿 전체)
+                        roi, // 소스 영역 (원본에서 잘라낼 부분)
+                        GraphicsUnit.Pixel);
+                }
+                
+                AddDebugLog($"템플릿 추출 성공: {roi.Width}x{roi.Height} at ({roi.X},{roi.Y})");
+                return template;
             }
-            return template;
+            catch (Exception ex)
+            {
+                AddDebugLog($"템플릿 추출 실패: {ex.Message}");
+                throw new Exception($"템플릿 추출 실패: {ex.Message}");
+            }
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
